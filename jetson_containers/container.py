@@ -7,6 +7,7 @@ import json
 import pprint
 import fnmatch
 import logging
+import platform
 import traceback
 import subprocess
 import dockerhub_api 
@@ -15,12 +16,14 @@ from .packages import find_package, find_packages, resolve_dependencies, validat
 from .l4t_version import L4T_VERSION, l4t_version_from_tag, l4t_version_compatible, get_l4t_base
 from .utils import split_container_name, query_yes_no, needs_sudo, sudo_prefix
 from .logging import log_dir, log_debug, pprint_debug
+from .cli import cli_tee
 
 from packaging.version import Version
 
 
 _NEWLINE_=" \\\n"  # used when building command strings
 
+runtime = "--runtime=nvidia" if platform.machine() == 'aarch64' else ""
 
 def build_container(name, packages, base=get_l4t_base(), build_flags='', simulate=False, skip_tests=[], test_only=[], push='', no_github_api=False):
     """
@@ -92,6 +95,15 @@ def build_container(name, packages, base=get_l4t_base(), build_flags='', simulat
     if postfix:
         name += f"{':' if tag_idx < 0 else '-'}{postfix}"
 
+    
+    # check if building with pty
+    build_with_pty = 'BUILD_WITH_PTY' in os.environ and os.environ['BUILD_WITH_PTY'] == '1'
+    print(f"build_with_pty={build_with_pty}")
+    
+    # check buildkit environment variable
+    env_prefix = " BUILDKIT=0" if 'BUILDKIT' in os.environ and os.environ['BUILDKIT'] == '0' else ""
+    
+
     # build chain of all packages
     for idx, package in enumerate(packages):
         # tag this build stage with the sub-package
@@ -104,7 +116,7 @@ def build_container(name, packages, base=get_l4t_base(), build_flags='', simulat
         pkg = find_package(package)
         
         if 'dockerfile' in pkg:
-            cmd = f"{sudo_prefix()}DOCKER_BUILDKIT=0 docker build --network=host --tag {container_name}" + _NEWLINE_
+            cmd = f"{sudo_prefix()}{env_prefix} docker build --network=host --platform=linux/arm64 --tag {container_name}" + _NEWLINE_
             if no_github_api:
                 dockerfilepath = os.path.join(pkg['path'], pkg['dockerfile'])
                 with open(dockerfilepath, 'r') as fp:
@@ -130,7 +142,8 @@ def build_container(name, packages, base=get_l4t_base(), build_flags='', simulat
                 cmd += build_flags + _NEWLINE_
                 
             cmd += pkg['path'] + _NEWLINE_ #" . "
-            cmd += f"2>&1 | tee {log_file + '.txt'}" + "; exit ${PIPESTATUS[0]}"  # non-tee version:  https://stackoverflow.com/a/34604684
+            if not build_with_pty:
+                cmd += f"2>&1 | tee {log_file + '.txt'}" + "; exit ${PIPESTATUS[0]}"  # non-tee version:  https://stackoverflow.com/a/34604684
             
             print(f"-- Building container {container_name}")
             print(f"\n{cmd}\n")
@@ -140,7 +153,10 @@ def build_container(name, packages, base=get_l4t_base(), build_flags='', simulat
                 cmd_file.write(cmd + '\n')
                     
             if not simulate:  # remove the line breaks that were added for readability, and set the shell to bash so we can use $PIPESTATUS 
-                status = subprocess.run(cmd.replace(_NEWLINE_, ' '), executable='/bin/bash', shell=True, check=True)  
+                if build_with_pty:
+                    cli_tee(cmd, wsl=True, pty=True)
+                else:
+                    status = subprocess.run(cmd.replace(_NEWLINE_, ' '), executable='/bin/bash', shell=True, check=True)  
         else:
             tag_container(base, container_name, simulate)
             
@@ -294,7 +310,8 @@ def test_container(name, package, simulate=False):
         test_ext = os.path.splitext(test_exe)[1]
         log_file = os.path.join(log_dir('test'), f"{name.replace('/','_')}_{test_exe}").replace(':','_')
 
-        cmd = f"{sudo_prefix()}docker run -t --rm --runtime=nvidia --network=host" + _NEWLINE_
+        
+        cmd = f"{sudo_prefix()}docker run -t --rm " + runtime + _NEWLINE_
         cmd += f"--volume {package['path']}:/test" + _NEWLINE_
         cmd += f"--volume {os.path.join(_PACKAGE_ROOT, 'data')}:/data" + _NEWLINE_
         cmd += f"--workdir /test" + _NEWLINE_

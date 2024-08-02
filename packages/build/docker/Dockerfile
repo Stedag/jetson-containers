@@ -18,7 +18,7 @@ RUN apt-get update && \
 		  lsb-release \
 		  docker.io \
 		  docker-compose \
-		  docker-compose-v2 \
+		#   docker-compose-v2 \ # not available in l4t32.7.x
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 

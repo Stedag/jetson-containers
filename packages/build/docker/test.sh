@@ -2,4 +2,4 @@
 set -e
 
 docker --version
-docker-compose --version
+# docker-compose --version
