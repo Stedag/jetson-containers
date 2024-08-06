@@ -20,6 +20,8 @@ import glob
 
 from packaging.version import Version
 
+if platform.machine() != 'aarch64':
+    print(f"Note: Packages are tested for building on Jetson devices (aarch64), not on {platform.machine()}. Packages may fail even with emulation.")
 
 def get_l4t_version(version_file='/etc/nv_tegra_release'):
     """
@@ -33,8 +35,6 @@ def get_l4t_version(version_file='/etc/nv_tegra_release'):
         
     The L4T_VERSION will either be parsed from /etc/nv_tegra_release or the $L4T_VERSION environment variable.
     """
-    if platform.machine() != 'aarch64':
-        print(f"Packages are tested for building on Jetson devices (aarch64), not on {platform.machine()}. Packages may fail even with emulation.")
         
     if 'L4T_VERSION' in os.environ and len(os.environ['L4T_VERSION']) > 0:
         return Version(os.environ['L4T_VERSION'].lower().lstrip('r'))
